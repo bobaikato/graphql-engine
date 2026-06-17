@@ -74,3 +74,8 @@ node_modules
 *.ticky.modules
 
 yarn-error.log
+
+# ota local runtime artifacts
+.ota/state/
+.ota/receipts/
+.ota/proof/

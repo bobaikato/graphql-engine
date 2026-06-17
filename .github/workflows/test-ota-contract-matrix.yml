@@ -1,0 +1,227 @@
+# <!--
+#                 █████
+#                ░░███
+#        ██████  ███████    ██████
+#       ███░░███░░░███░    ░░░░░███
+#      ░███ ░███  ░███      ███████
+#      ░███ ░███  ░███ ███ ███░░███
+#      ░░██████   ░░█████ ░░████████
+#       ░░░░░░     ░░░░░   ░░░░░░░░
+#
+#    Copyright (C) 2026 — 2026, Ota. All Rights Reserved.
+#
+#    DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+#    Licensed under the Apache License, Version 2.0. See LICENSE for the full license text.
+#    You may not use this file except in compliance with that License.
+#    Unless required by applicable law or agreed to in writing, software distributed under the
+#    License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+#    either express or implied. See the License for the specific language governing permissions
+#    and limitations under the License.
+#
+#    If you need additional information or have any questions, please email: os@ota.run
+# -->
+
+name: 'Test: Ota contract matrix'
+
+on:
+  workflow_dispatch:
+    inputs:
+      ota_git_rev:
+        description: Ota git revision to install for this matrix run
+        required: false
+        default: 1.6.21-implementation
+  pull_request:
+    paths:
+      - 'v3/ota.yaml'
+      - '.github/workflows/test-ota-contract-matrix.yml'
+  push:
+    paths:
+      - 'v3/ota.yaml'
+      - '.github/workflows/test-ota-contract-matrix.yml'
+
+concurrency:
+  group: ota-contract-matrix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OTA_NO_UPDATE_CHECK: '1'
+  OTA_GIT_REV: ${{ github.event.inputs.ota_git_rev || '1.6.21-implementation' }}
+
+jobs:
+  contract:
+    name: Ota Contract Matrix (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            os: ubuntu-latest
+            run_shell: bash
+            full_runtime_proof: true
+          - name: macos
+            os: macos-latest
+            run_shell: bash
+            full_runtime_proof: false
+          - name: windows
+            os: windows-latest
+            run_shell: pwsh
+            full_runtime_proof: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install ota (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://dist.ota.run/install.sh | OTA_GIT_REV="${OTA_GIT_REV}" sh -s -- --from-git
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install ota (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:OTA_GIT_REV = "${env:OTA_GIT_REV}"
+          & ([scriptblock]::Create((irm https://dist.ota.run/install.ps1))) -FromGit
+          (Join-Path $env:LOCALAPPDATA "ota\\bin") | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Contract gates [bash]
+        if: matrix.run_shell == 'bash'
+        working-directory: v3
+        shell: bash
+        run: |
+          mkdir -p .ota/ci
+          ota validate --json . > .ota/ci/validate.json
+          ota validate .
+          ota doctor --json . > .ota/ci/doctor.json || true
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path('.ota/ci/doctor.json').read_text())
+          if report.get('error'):
+              print(json.dumps(report, indent=2))
+              sys.exit(1)
+          PY
+          ota doctor . || true
+          ota tasks --use .
+          ota tasks --safe --use .
+          ota tasks --workflow verify .
+          ota tasks --workflow docker .
+          ota execution topology --json . > .ota/ci/execution-topology.json
+
+      - name: Contract gates [pwsh]
+        if: matrix.run_shell == 'pwsh'
+        working-directory: v3
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .ota/ci | Out-Null
+          ota validate --json . | Out-File -FilePath .ota/ci/validate.json -Encoding utf8
+          ota validate .
+          ota doctor --json . | Out-File -FilePath .ota/ci/doctor.json -Encoding utf8
+          $doctorStatus = $LASTEXITCODE
+          $doctor = Get-Content .ota/ci/doctor.json -Raw | ConvertFrom-Json
+          if ($null -ne $doctor.error -and $doctorStatus -ne 0) {
+            $doctor | ConvertTo-Json -Depth 100
+            exit 1
+          }
+          ota doctor .; if ($LASTEXITCODE -ne 0) { Write-Host 'ota doctor is blocked on a fresh checkout; continuing with matrix coverage.' }
+          ota tasks --use .
+          ota tasks --safe --use .
+          ota tasks --workflow verify .
+          ota tasks --workflow docker .
+          ota execution topology --json . | Out-File -FilePath .ota/ci/execution-topology.json -Encoding utf8
+
+      - name: Dry-run verify and docker workflows [bash]
+        if: matrix.run_shell == 'bash'
+        working-directory: v3
+        shell: bash
+        run: |
+          set +e
+          ota run verify --dry-run --json . > .ota/ci/run-verify-dry-run.json
+          verify_status=$?
+          ota up --workflow docker --dry-run --json . > .ota/ci/up-docker-dry-run.json
+          docker_status=$?
+          set -e
+          VERIFY_STATUS="$verify_status" DOCKER_STATUS="$docker_status" python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          verify = json.loads(Path('.ota/ci/run-verify-dry-run.json').read_text())
+          docker = json.loads(Path('.ota/ci/up-docker-dry-run.json').read_text())
+          failures = []
+          if int(os.environ['VERIFY_STATUS']) != 0 or verify.get('preview_status') != 'RUNNABLE':
+              failures.append({'kind': 'verify', 'exit': os.environ['VERIFY_STATUS'], 'report': verify})
+          if int(os.environ['DOCKER_STATUS']) != 0 or docker.get('preview_status') != 'RUNNABLE':
+              failures.append({'kind': 'docker', 'exit': os.environ['DOCKER_STATUS'], 'report': docker})
+          if failures:
+              print(json.dumps(failures, indent=2))
+              sys.exit(1)
+          PY
+
+      - name: Dry-run verify and docker workflows [pwsh]
+        if: matrix.run_shell == 'pwsh'
+        working-directory: v3
+        shell: pwsh
+        run: |
+          ota run verify --dry-run --json . | Out-File -FilePath .ota/ci/run-verify-dry-run.json -Encoding utf8
+          $verifyStatus = $LASTEXITCODE
+          ota up --workflow docker --dry-run --json . | Out-File -FilePath .ota/ci/up-docker-dry-run.json -Encoding utf8
+          $dockerStatus = $LASTEXITCODE
+          $verify = Get-Content .ota/ci/run-verify-dry-run.json -Raw | ConvertFrom-Json
+          $docker = Get-Content .ota/ci/up-docker-dry-run.json -Raw | ConvertFrom-Json
+          $failed = $false
+          if ($verifyStatus -ne 0 -or $verify.preview_status -ne 'RUNNABLE') {
+            $failed = $true
+            @{ kind = 'verify'; exit = $verifyStatus; report = $verify } | ConvertTo-Json -Depth 100
+          }
+          if ($dockerStatus -ne 0 -or $docker.preview_status -ne 'RUNNABLE') {
+            $failed = $true
+            @{ kind = 'docker'; exit = $dockerStatus; report = $docker } | ConvertTo-Json -Depth 100
+          }
+          if ($failed) {
+            exit 1
+          }
+
+      - name: Execute setup hydration
+        if: runner.os == 'Linux'
+        working-directory: v3
+        shell: bash
+        run: ota run setup --native --stream .
+
+      - name: Proof packaged docker workflow
+        if: matrix.full_runtime_proof
+        working-directory: v3
+        shell: bash
+        run: |
+          ota up --workflow docker --native --stream .
+
+      - name: Stop packaged docker workflow
+        if: matrix.full_runtime_proof && always()
+        working-directory: v3
+        shell: bash
+        run: |
+          ota run compose:down --native --stream . || true
+
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-contract-matrix-${{ matrix.name }}
+          path: v3/.ota/
+          retention-days: 7

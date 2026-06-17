@@ -1,0 +1,298 @@
+#                █████
+#               ░░███
+#       ██████  ███████    ██████
+#      ███░░███░░░███░    ░░░░░███
+#     ░███ ░███  ░███      ███████
+#     ░███ ░███  ░███ ███ ███░░███
+#     ░░██████   ░░█████ ░░████████
+#      ░░░░░░     ░░░░░   ░░░░░░░░
+#
+#   Copyright (C) 2026 — 2026, Ota. All Rights Reserved.
+#
+#   DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+#   Licensed under the Apache License, Version 2.0. See LICENSE for the full license text.
+#   You may not use this file except in compliance with that License.
+#   Unless required by applicable law or agreed to in writing, software distributed under the
+#   License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+#   either express or implied. See the License for the specific language governing permissions
+#   and limitations under the License.
+#
+#   If you need additional information or have any questions, please email: os@ota.run
+
+version: 1
+project:
+  name: hasura-v3
+  description: >
+    Narrow Hasura v3 pressure slice covering the workspace Rust/Cargo verification lane and the
+    packaged docker-compose runtime that serves static metadata.json; the broader monorepo and the
+    DDN-authored local metadata build lifecycle remain out of scope for this contract
+  type: application
+metadata:
+  ota:
+    minimum_version: "1.6.21"
+execution:
+  default_context: host
+  contexts:
+    host:
+      backend: native
+toolchains:
+  rust:
+    version: "1.94.1"
+    profile: default
+    fulfillment:
+      mode: run
+tools:
+  docker:
+    version: "*"
+    required: false
+checks:
+  - name: static-metadata-present
+    kind: file
+    severity: error
+    path: static/metadata.json
+    expect: file
+  - name: static-auth-config-present
+    kind: file
+    severity: error
+    path: static/auth/auth_config_v3.json
+    expect: file
+surfaces:
+  engine-http:
+    kind: http
+    port: 3000
+    path: /
+    readiness:
+      kind: http
+      method: GET
+      path: /health
+      success:
+        status:
+          - 200
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+  jaeger-ui:
+    kind: http
+    port: 4002
+    path: /
+    readiness:
+      kind: http
+      method: GET
+      path: /
+      success:
+        status:
+          - 200
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+services:
+  engine:
+    manager:
+      kind: compose
+      name: hasura-v3
+      file: docker-compose.yaml
+      service: engine
+    endpoints:
+      host:
+        address: 127.0.0.1
+        port: 3000
+    readiness:
+      from: host
+      kind: http
+      method: GET
+      path: /health
+      success:
+        status:
+          - 200
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+  jaeger:
+    manager:
+      kind: compose
+      name: hasura-v3
+      file: docker-compose.yaml
+      service: jaeger
+    endpoints:
+      host:
+        address: 127.0.0.1
+        port: 4002
+    readiness:
+      from: host
+      kind: http
+      method: GET
+      path: /
+      success:
+        status:
+          - 200
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+  postgres:
+    manager:
+      kind: compose
+      name: hasura-v3
+      file: docker-compose.yaml
+      service: postgres
+    endpoints:
+      host:
+        address: 127.0.0.1
+        port: 5432
+    readiness:
+      from: host
+      kind: tcp
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+tasks:
+  setup:
+    context: host
+    description: Hydrate workspace Cargo dependencies through the declared Rust toolchain lane
+    prepare:
+      kind: dependency_hydration
+      medium: package_dependencies
+      source:
+        kind: cargo
+        cwd: .
+    requirements:
+      toolchains:
+        - rust
+    effects:
+      writes:
+        - target
+      network: true
+      network_kind: dependency_hydration
+  lint:
+    context: host
+    description: Run the canonical workspace clippy verification lane
+    run: cargo clippy --all-targets --no-deps
+    depends_on:
+      - setup
+    requirements:
+      toolchains:
+        - rust
+  build:
+    context: host
+    description: Compile the full v3 workspace through the canonical release build lane
+    run: cargo build --release --all-targets
+    depends_on:
+      - setup
+    requirements:
+      toolchains:
+        - rust
+  verify:
+    description: Run the narrow source verification slice modeled by this contract
+    aggregate:
+      tasks:
+        - lint
+        - build
+  compose:up:
+    context: host
+    description: Start the packaged v3 docker-compose runtime with static metadata.json
+    notes: |
+      This intentionally models the documented `docker compose up` path from `v3/README.md`.
+      It does not pretend to own the broader DDN local build path yet; `ddn supergraph build local`
+      and `ddn run docker-start` remain a separate Ota platform pressure point.
+    category: dev
+    adapter_inputs:
+      compose:
+        files:
+          - docker-compose.yaml
+    launch:
+      kind: command
+      exe: docker
+      args:
+        - compose
+        - up
+    requirements:
+      tools:
+        docker: "*"
+      checks:
+        - static-metadata-present
+        - static-auth-config-present
+    effects:
+      external_state:
+        - docker
+    runtime:
+      kind: service
+      surfaces:
+        engine-http:
+          project:
+            host:
+              primary: true
+        jaeger-ui: {}
+  compose:down:
+    context: host
+    description: Stop the packaged v3 docker-compose runtime
+    category: setup
+    adapter_inputs:
+      compose:
+        files:
+          - docker-compose.yaml
+    command:
+      exe: docker
+      args:
+        - compose
+        - down
+    requirements:
+      tools:
+        docker: "*"
+    effects:
+      external_state:
+        - docker
+workflows:
+  default: verify
+  verify:
+    intent: ci_verification
+    description: Canonical Rust/Cargo verification path for the Hasura v3 workspace slice
+    setup:
+      task: setup
+    run:
+      task: verify
+  docker:
+    intent: packaged_runtime
+    description: Packaged docker-compose runtime with static metadata.json, Postgres, and Jaeger
+    run:
+      task: compose:up
+    readiness:
+      surfaces:
+        - engine-http
+        - jaeger-ui
+    exposes:
+      - surface: engine-http
+      - surface: jaeger-ui
+agent:
+  posture: readiness_strict
+  entrypoint: setup
+  default_task: verify
+  safe_tasks:
+    - setup
+    - lint
+    - build
+    - verify
+  verify_after_changes:
+    - lint
+    - build
+  writable_paths:
+    - target
+    - crates
+    - static
+    - benchmarks
+    - rfcs
+  protected_paths:
+    - docker-compose.yaml
+    - ci.docker-compose.yaml
+    - ota.yaml
+  notes: |
+    Keep this contract scoped to `v3/`.
+    Do not widen this into monorepo truth unless Hasura's root runtime and setup paths are modeled
+    intentionally.
+    The static metadata compose path is modeled here because it is explicit repo truth today.
+    The DDN local build path is not yet first-class Ota ownership; call that out as a platform gap
+    instead of hiding it in shell glue.

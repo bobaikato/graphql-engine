@@ -31,3 +31,8 @@ coverage/
 
 # claude
 .claude
+
+# ota local runtime artifacts
+.ota/state/
+.ota/receipts/
+.ota/proof/
