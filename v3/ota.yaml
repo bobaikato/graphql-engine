@@ -171,7 +171,12 @@ tasks:
   lint:
     context: host
     description: Run the canonical workspace clippy verification lane
-    run: cargo clippy --all-targets --no-deps
+    command:
+      exe: cargo
+      args:
+        - clippy
+        - --all-targets
+        - --no-deps
     depends_on:
       - setup
     requirements:
@@ -180,7 +185,12 @@ tasks:
   build:
     context: host
     description: Compile the full v3 workspace through the canonical release build lane
-    run: cargo build --release --all-targets
+    command:
+      exe: cargo
+      args:
+        - build
+        - --release
+        - --all-targets
     depends_on:
       - setup
     requirements:
@@ -296,3 +306,9 @@ agent:
     The static metadata compose path is modeled here because it is explicit repo truth today.
     The DDN local build path is not yet first-class Ota ownership; call that out as a platform gap
     instead of hiding it in shell glue.
+  bootstrap:
+    ota:
+      note: Install ota when missing so contributors and agents can run the readiness workflows declared in this contract.
+      source:
+        kind: branch
+        branch: 1.6.21-implementation
