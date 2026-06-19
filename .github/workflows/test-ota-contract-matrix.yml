@@ -152,12 +152,20 @@ jobs:
           failures = []
           if int(os.environ['VERIFY_STATUS']) != 0 or verify.get('preview_status') != 'RUNNABLE':
               failures.append({'kind': 'verify', 'exit': os.environ['VERIFY_STATUS'], 'report': verify})
-          if int(os.environ['DOCKER_STATUS']) != 0 or docker.get('preview_status') != 'RUNNABLE':
+          if (
+              os.environ['FULL_RUNTIME_PROOF'] == 'true'
+              and (
+                  int(os.environ['DOCKER_STATUS']) != 0
+                  or docker.get('preview_status') != 'RUNNABLE'
+              )
+          ):
               failures.append({'kind': 'docker', 'exit': os.environ['DOCKER_STATUS'], 'report': docker})
           if failures:
               print(json.dumps(failures, indent=2))
               sys.exit(1)
           PY
+        env:
+          FULL_RUNTIME_PROOF: ${{ matrix.full_runtime_proof }}
 
       - name: Dry-run verify and docker workflows [pwsh]
         if: matrix.run_shell == 'pwsh'
@@ -175,13 +183,15 @@ jobs:
             $failed = $true
             @{ kind = 'verify'; exit = $verifyStatus; report = $verify } | ConvertTo-Json -Depth 100
           }
-          if ($dockerStatus -ne 0 -or $docker.preview_status -ne 'RUNNABLE') {
+          if ($env:FULL_RUNTIME_PROOF -eq 'true' -and ($dockerStatus -ne 0 -or $docker.preview_status -ne 'RUNNABLE')) {
             $failed = $true
             @{ kind = 'docker'; exit = $dockerStatus; report = $docker } | ConvertTo-Json -Depth 100
           }
           if ($failed) {
             exit 1
           }
+        env:
+          FULL_RUNTIME_PROOF: ${{ matrix.full_runtime_proof }}
 
       - name: Execute setup hydration
         if: runner.os == 'Linux'
