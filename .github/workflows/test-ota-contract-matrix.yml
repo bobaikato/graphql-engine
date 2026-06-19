@@ -74,7 +74,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up ota
-        uses: ota-run/setup@v1
+        uses: ota-run/setup@v1.0.8
         with:
           source: contract
           contract-path: v3/ota.yaml
