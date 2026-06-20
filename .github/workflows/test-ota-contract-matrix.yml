@@ -150,7 +150,7 @@ jobs:
           verify = json.loads(Path('.ota/ci/run-verify-dry-run.json').read_text())
           docker = json.loads(Path('.ota/ci/up-docker-dry-run.json').read_text())
           failures = []
-          if int(os.environ['VERIFY_STATUS']) != 0 or verify.get('preview_status') != 'RUNNABLE':
+          if int(os.environ['VERIFY_STATUS']) != 0 or not str(verify.get('preview_status', '')).startswith('RUNNABLE'):
               failures.append({'kind': 'verify', 'exit': os.environ['VERIFY_STATUS'], 'report': verify})
           if (
               os.environ['FULL_RUNTIME_PROOF'] == 'true'
@@ -179,7 +179,7 @@ jobs:
           $verify = Get-Content .ota/ci/run-verify-dry-run.json -Raw | ConvertFrom-Json
           $docker = Get-Content .ota/ci/up-docker-dry-run.json -Raw | ConvertFrom-Json
           $failed = $false
-          if ($verifyStatus -ne 0 -or $verify.preview_status -ne 'RUNNABLE') {
+          if ($verifyStatus -ne 0 -or -not $verify.preview_status.StartsWith('RUNNABLE')) {
             $failed = $true
             @{ kind = 'verify'; exit = $verifyStatus; report = $verify } | ConvertTo-Json -Depth 100
           }

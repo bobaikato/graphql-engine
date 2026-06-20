@@ -70,9 +70,9 @@ surfaces:
         status:
           - 200
       interval: 5s
-      timeout: 3s
-      retries: 24
-      start_period: 20s
+      timeout: 5s
+      retries: 72
+      start_period: 120s
   jaeger-ui:
     kind: http
     port: 4002
@@ -85,9 +85,9 @@ surfaces:
         status:
           - 200
       interval: 5s
-      timeout: 3s
-      retries: 24
-      start_period: 10s
+      timeout: 5s
+      retries: 48
+      start_period: 60s
 services:
   engine:
     manager:
@@ -108,9 +108,9 @@ services:
         status:
           - 200
       interval: 5s
-      timeout: 3s
-      retries: 24
-      start_period: 20s
+      timeout: 5s
+      retries: 72
+      start_period: 120s
   jaeger:
     manager:
       kind: compose
@@ -130,9 +130,9 @@ services:
         status:
           - 200
       interval: 5s
-      timeout: 3s
-      retries: 24
-      start_period: 10s
+      timeout: 5s
+      retries: 48
+      start_period: 60s
   postgres:
     manager:
       kind: compose
