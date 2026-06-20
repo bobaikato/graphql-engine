@@ -1,0 +1,188 @@
+# 
+#                █████
+#               ░░███
+#       ██████  ███████    ██████
+#      ███░░███░░░███░    ░░░░░███
+#     ░███ ░███  ░███      ███████
+#     ░███ ░███  ░███ ███ ███░░███
+#     ░░██████   ░░█████ ░░████████
+#      ░░░░░░     ░░░░░   ░░░░░░░░
+#
+#   Copyright (C) 2026 — 2026, Ota. All Rights Reserved.
+#
+#   DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+#   Licensed under the Apache License, Version 2.0. See LICENSE for the full license text.
+#   You may not use this file except in compliance with that License.
+#   Unless required by applicable law or agreed to in writing, software distributed under the
+#   License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+#   either express or implied. See the License for the specific language governing permissions
+#   and limitations under the License.
+#
+#   If you need additional information or have any questions, please email: os@ota.run
+
+version: 1
+project:
+  name: hasura-kubernetes-install-manifests
+  description: Focused Ota pressure slice for the raw Kubernetes install manifests under install-manifests/kubernetes.
+  type: application
+metadata:
+  ota:
+    minimum_version: "1.6.21"
+execution:
+  default_context: host
+  contexts:
+    host:
+      backend: native
+tools:
+  kubectl:
+    version: "*"
+    acquisition:
+      provider: apt
+      package: kubectl
+    platforms:
+      macos:
+        acquisition:
+          provider: brew
+          package: kubernetes-cli
+      windows:
+        acquisition:
+          provider: winget
+          package: Kubernetes.kubectl
+tasks:
+  k8s:preview:deployment:
+    context: host
+    description: Render the Hasura deployment manifest through kubectl local object parsing
+    command:
+      exe: kubectl
+      args:
+        - annotate
+        - --local
+        - -f
+        - deployment.yaml
+        - ota.run/preview=true
+        - -o
+        - yaml
+    requirements:
+      tools:
+        kubectl: "*"
+  k8s:preview:service:
+    context: host
+    description: Render the Hasura service manifest through kubectl local object parsing
+    command:
+      exe: kubectl
+      args:
+        - annotate
+        - --local
+        - -f
+        - svc.yaml
+        - ota.run/preview=true
+        - -o
+        - yaml
+    requirements:
+      tools:
+        kubectl: "*"
+  verify:
+    description: Render the focused raw Kubernetes manifest set without mutating the cluster
+    aggregate:
+      tasks:
+        - k8s:preview:deployment
+        - k8s:preview:service
+  k8s:apply:deployment:
+    context: host
+    description: Apply the Hasura deployment manifest to the selected cluster
+    command:
+      exe: kubectl
+      args:
+        - apply
+        - -f
+        - deployment.yaml
+    requirements:
+      tools:
+        kubectl: "*"
+    effects:
+      external_state:
+        - kubernetes
+  k8s:apply:service:
+    context: host
+    description: Apply the Hasura service manifest to the selected cluster
+    command:
+      exe: kubectl
+      args:
+        - apply
+        - -f
+        - svc.yaml
+    requirements:
+      tools:
+        kubectl: "*"
+    effects:
+      external_state:
+        - kubernetes
+  k8s:deploy:
+    description: Apply the focused Hasura Kubernetes manifest set
+    aggregate:
+      tasks:
+        - k8s:apply:deployment
+        - k8s:apply:service
+  k8s:observe:
+    context: host
+    description: Confirm the focused Hasura Kubernetes resources exist in the selected cluster
+    command:
+      exe: kubectl
+      args:
+        - get
+        - -f
+        - deployment.yaml
+        - -f
+        - svc.yaml
+        - -o
+        - name
+    requirements:
+      tools:
+        kubectl: "*"
+  k8s:cluster:proof:
+    description: Apply the focused Hasura Kubernetes manifest set and confirm the resources exist
+    aggregate:
+      tasks:
+        - k8s:apply:deployment
+        - k8s:apply:service
+        - k8s:observe
+workflows:
+  default: verify
+  verify:
+    intent: ci_verification
+    description: Canonical non-mutating kubectl local-render path for the raw Hasura manifests
+    run:
+      task: verify
+  deploy:
+    intent: deployment
+    description: Canonical mutating kubectl apply path plus cluster-backed resource confirmation for the raw Hasura manifests
+    run:
+      task: k8s:cluster:proof
+agent:
+  posture: readiness_strict
+  entrypoint: verify
+  default_task: verify
+  safe_tasks:
+    - k8s:preview:deployment
+    - k8s:preview:service
+    - verify
+  verify_after_changes:
+    - verify
+  writable_paths: []
+  protected_paths:
+    - deployment.yaml
+    - svc.yaml
+    - ota.yaml
+  notes: |
+    Keep this contract scoped to install-manifests/kubernetes only.
+    The operator-owned step of editing deployment.yaml with the real database URL remains repo truth today.
+    Ota owns kubectl execution and local-render/deploy task truth here, not manifest parameterization.
+    Cluster-backed proof requires a real Kubernetes API target; this contract models that as the
+    mutating `deploy` workflow instead of pretending local-only kubectl rendering is server proof.
+  bootstrap:
+    ota:
+      note: Install ota when missing so contributors and agents can run the readiness workflows declared in this contract.
+      source:
+        kind: branch
+        branch: 1.6.21-implementation

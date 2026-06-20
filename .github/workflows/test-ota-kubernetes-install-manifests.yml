@@ -1,0 +1,208 @@
+# <!--
+#                 █████
+#                ░░███
+#        ██████  ███████    ██████
+#       ███░░███░░░███░    ░░░░░███
+#      ░███ ░███  ░███      ███████
+#      ░███ ░███  ░███ ███ ███░░███
+#      ░░██████   ░░█████ ░░████████
+#       ░░░░░░     ░░░░░   ░░░░░░░░
+#
+#    Copyright (C) 2026 — 2026, Ota. All Rights Reserved.
+#
+#    DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+#
+#    Licensed under the Apache License, Version 2.0. See LICENSE for the full license text.
+#    You may not use this file except in compliance with that License.
+#    Unless required by applicable law or agreed to in writing, software distributed under the
+#    License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+#    either express or implied. See the License for the specific language governing permissions
+#    and limitations under the License.
+#
+#    If you need additional information or have any questions, please email: os@ota.run
+# -->
+
+name: 'Test: Ota Kubernetes install manifests'
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'install-manifests/kubernetes/**'
+      - '.github/workflows/test-ota-kubernetes-install-manifests.yml'
+  push:
+    paths:
+      - 'install-manifests/kubernetes/**'
+      - '.github/workflows/test-ota-kubernetes-install-manifests.yml'
+
+concurrency:
+  group: ota-kubernetes-install-manifests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OTA_NO_UPDATE_CHECK: '1'
+
+jobs:
+  contract:
+    name: Ota Kubernetes Install Manifests (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            os: ubuntu-latest
+            run_shell: bash
+            runtime_proof: true
+          - name: macos
+            os: macos-latest
+            run_shell: bash
+            runtime_proof: false
+          - name: windows
+            os: windows-latest
+            run_shell: pwsh
+            runtime_proof: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up ota
+        uses: ota-run/setup@v1.0.8
+        with:
+          source: contract
+          contract-path: install-manifests/kubernetes/ota.yaml
+
+      - name: Contract gates [bash]
+        if: matrix.run_shell == 'bash'
+        working-directory: install-manifests/kubernetes
+        shell: bash
+        run: |
+          mkdir -p .ota/ci
+          ota validate --json . > .ota/ci/validate.json
+          ota validate .
+          ota doctor --json . > .ota/ci/doctor.json
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          report = json.loads(Path('.ota/ci/doctor.json').read_text())
+          if report.get('error'):
+              print(json.dumps(report, indent=2))
+              sys.exit(1)
+          PY
+          ota doctor .
+          ota tasks --use .
+          ota tasks --safe --use .
+          ota tasks --workflow verify .
+          ota tasks --workflow deploy .
+          ota execution topology --json . > .ota/ci/execution-topology.json
+
+      - name: Contract gates [pwsh]
+        if: matrix.run_shell == 'pwsh'
+        working-directory: install-manifests/kubernetes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .ota/ci | Out-Null
+          ota validate --json . | Out-File -FilePath .ota/ci/validate.json -Encoding utf8
+          ota validate .
+          ota doctor --json . | Out-File -FilePath .ota/ci/doctor.json -Encoding utf8
+          $doctor = Get-Content .ota/ci/doctor.json -Raw | ConvertFrom-Json
+          if ($null -ne $doctor.error) {
+            $doctor | ConvertTo-Json -Depth 100
+            exit 1
+          }
+          ota doctor .
+          ota tasks --use .
+          ota tasks --safe --use .
+          ota tasks --workflow verify .
+          ota tasks --workflow deploy .
+          ota execution topology --json . | Out-File -FilePath .ota/ci/execution-topology.json -Encoding utf8
+
+      - name: Dry-run verify and deploy [bash]
+        if: matrix.run_shell == 'bash'
+        working-directory: install-manifests/kubernetes
+        shell: bash
+        run: |
+          ota run verify --dry-run --json . > .ota/ci/run-verify-dry-run.json
+          ota run k8s:cluster:proof --dry-run --json . > .ota/ci/run-deploy-dry-run.json
+          ota up --workflow verify --dry-run --json . > .ota/ci/up-verify-dry-run.json
+          ota up --workflow deploy --dry-run --json . > .ota/ci/up-deploy-dry-run.json
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          verify = json.loads(Path('.ota/ci/run-verify-dry-run.json').read_text())
+          deploy = json.loads(Path('.ota/ci/run-deploy-dry-run.json').read_text())
+          verify_workflow = json.loads(Path('.ota/ci/up-verify-dry-run.json').read_text())
+          deploy_workflow = json.loads(Path('.ota/ci/up-deploy-dry-run.json').read_text())
+          reports = [verify, deploy, verify_workflow, deploy_workflow]
+          if not all(str(report.get('preview_status', '')).startswith('RUNNABLE') for report in reports):
+              print(json.dumps(reports, indent=2))
+              sys.exit(1)
+          PY
+
+      - name: Dry-run verify and deploy [pwsh]
+        if: matrix.run_shell == 'pwsh'
+        working-directory: install-manifests/kubernetes
+        shell: pwsh
+        run: |
+          ota run verify --dry-run --json . | Out-File -FilePath .ota/ci/run-verify-dry-run.json -Encoding utf8
+          ota run k8s:cluster:proof --dry-run --json . | Out-File -FilePath .ota/ci/run-deploy-dry-run.json -Encoding utf8
+          ota up --workflow verify --dry-run --json . | Out-File -FilePath .ota/ci/up-verify-dry-run.json -Encoding utf8
+          ota up --workflow deploy --dry-run --json . | Out-File -FilePath .ota/ci/up-deploy-dry-run.json -Encoding utf8
+          $verify = Get-Content .ota/ci/run-verify-dry-run.json -Raw | ConvertFrom-Json
+          $deploy = Get-Content .ota/ci/run-deploy-dry-run.json -Raw | ConvertFrom-Json
+          $verifyWorkflow = Get-Content .ota/ci/up-verify-dry-run.json -Raw | ConvertFrom-Json
+          $deployWorkflow = Get-Content .ota/ci/up-deploy-dry-run.json -Raw | ConvertFrom-Json
+          foreach ($report in @($verify, $deploy, $verifyWorkflow, $deployWorkflow)) {
+            if (-not $report.preview_status.StartsWith('RUNNABLE')) {
+              $report | ConvertTo-Json -Depth 100
+              exit 1
+            }
+          }
+
+      - name: Execute manifest preview tasks
+        if: matrix.runtime_proof
+        working-directory: install-manifests/kubernetes
+        shell: bash
+        run: |
+          ota run k8s:preview:deployment --native --stream .
+          ota run k8s:preview:service --native --stream .
+          ota run verify --native --stream .
+
+      - name: Create kind cluster
+        if: matrix.runtime_proof
+        uses: helm/kind-action@v1.12.0
+
+      - name: Execute cluster-backed deploy proof
+        if: matrix.runtime_proof
+        working-directory: install-manifests/kubernetes
+        shell: bash
+        run: |
+          kubectl cluster-info
+          ota run k8s:cluster:proof --native --stream .
+          ota up --workflow deploy --native --stream .
+
+      - name: Dump cluster state on failure
+        if: ${{ matrix.runtime_proof && failure() }}
+        working-directory: install-manifests/kubernetes
+        shell: bash
+        run: |
+          kubectl get all -A || true
+
+      - name: Upload failure artifacts
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-kubernetes-install-manifests-${{ matrix.name }}
+          path: install-manifests/kubernetes/.ota/
+          retention-days: 7
