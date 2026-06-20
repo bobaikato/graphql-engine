@@ -73,21 +73,6 @@ surfaces:
       timeout: 5s
       retries: 72
       start_period: 120s
-  jaeger-ui:
-    kind: http
-    port: 4002
-    path: /
-    readiness:
-      kind: http
-      method: GET
-      path: /
-      success:
-        status:
-          - 200
-      interval: 5s
-      timeout: 5s
-      retries: 48
-      start_period: 60s
 services:
   engine:
     manager:
@@ -111,45 +96,6 @@ services:
       timeout: 5s
       retries: 72
       start_period: 120s
-  jaeger:
-    manager:
-      kind: compose
-      name: hasura-v3
-      file: docker-compose.yaml
-      service: jaeger
-    endpoints:
-      host:
-        address: 127.0.0.1
-        port: 4002
-    readiness:
-      from: host
-      kind: http
-      method: GET
-      path: /
-      success:
-        status:
-          - 200
-      interval: 5s
-      timeout: 5s
-      retries: 48
-      start_period: 60s
-  postgres:
-    manager:
-      kind: compose
-      name: hasura-v3
-      file: docker-compose.yaml
-      service: postgres
-    endpoints:
-      host:
-        address: 127.0.0.1
-        port: 5432
-    readiness:
-      from: host
-      kind: tcp
-      interval: 5s
-      timeout: 3s
-      retries: 24
-      start_period: 10s
 tasks:
   setup:
     context: host
@@ -204,11 +150,12 @@ tasks:
         - build
   compose:up:
     context: host
-    description: Start the packaged v3 docker-compose runtime with static metadata.json
+    description: Start the narrow packaged engine runtime with static metadata.json
     notes: |
-      This intentionally models the documented `docker compose up` path from `v3/README.md`.
-      It does not pretend to own the broader DDN local build path yet; `ddn supergraph build local`
-      and `ddn run docker-start` remain a separate Ota platform pressure point.
+      This intentionally proves the smallest truthful packaged engine slice from `v3/docker-compose.yaml`
+      that can satisfy the declared `/health` runtime proof.
+      It does not pretend to own the broader full-stack Postgres/connector/DDN local build path yet;
+      those remain a separate Ota platform pressure point.
     category: dev
     adapter_inputs:
       compose:
@@ -220,6 +167,8 @@ tasks:
       args:
         - compose
         - up
+        - --no-deps
+        - engine
     requirements:
       tools:
         docker: "*"
@@ -236,10 +185,9 @@ tasks:
           project:
             host:
               primary: true
-        jaeger-ui: {}
   compose:down:
     context: host
-    description: Stop the packaged v3 docker-compose runtime
+    description: Stop the narrow packaged engine runtime
     category: setup
     adapter_inputs:
       compose:
@@ -267,16 +215,14 @@ workflows:
       task: verify
   docker:
     intent: packaged_runtime
-    description: Packaged docker-compose runtime with static metadata.json, Postgres, and Jaeger
+    description: Narrow packaged engine runtime with static metadata.json and declared compose dependencies
     run:
       task: compose:up
     readiness:
       surfaces:
         - engine-http
-        - jaeger-ui
     exposes:
       - surface: engine-http
-      - surface: jaeger-ui
 agent:
   posture: readiness_strict
   entrypoint: setup
@@ -303,7 +249,7 @@ agent:
     Keep this contract scoped to `v3/`.
     Do not widen this into monorepo truth unless Hasura's root runtime and setup paths are modeled
     intentionally.
-    The static metadata compose path is modeled here because it is explicit repo truth today.
+    The static metadata packaged engine path is modeled here because it is explicit repo truth today.
     The DDN local build path is not yet first-class Ota ownership; call that out as a platform gap
     instead of hiding it in shell glue.
   bootstrap:
