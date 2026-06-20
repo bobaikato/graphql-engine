@@ -96,7 +96,6 @@ jobs:
               print(json.dumps(validate, indent=2))
               sys.exit(1)
           PY
-          ota validate . || true
           ota doctor --json . > .ota/ci/doctor.json
           python - <<'PY'
           import json
@@ -127,7 +126,6 @@ jobs:
             $validate | ConvertTo-Json -Depth 100
             exit 1
           }
-          ota validate .; if ($LASTEXITCODE -ne 0) { Write-Host 'ota validate returned non-zero despite valid JSON output; continuing with JSON truth.' }
           ota doctor --json . | Out-File -FilePath .ota/ci/doctor.json -Encoding utf8
           $doctor = Get-Content .ota/ci/doctor.json -Raw | ConvertFrom-Json
           if ($null -ne $doctor.error) {
