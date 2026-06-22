@@ -185,4 +185,4 @@ agent:
       note: Install ota when missing so contributors and agents can run the readiness workflows declared in this contract.
       source:
         kind: branch
-        branch: 1.6.21-implementation
+        branch: 1.6.22-implementation
