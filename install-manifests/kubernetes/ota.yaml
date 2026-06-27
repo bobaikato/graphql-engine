@@ -183,6 +183,5 @@ agent:
   bootstrap:
     ota:
       note: Install ota when missing so contributors and agents can run the readiness workflows declared in this contract.
-      source:
-        kind: branch
-        branch: 1.6.22-implementation
+      sh: curl -fsSL https://dist.ota.run/install.sh | OTA_GIT_BRANCH=1.6.22-implementation sh -s -- --from-git
+      powershell: $env:OTA_GIT_BRANCH='1.6.22-implementation'; & ([scriptblock]::Create((irm https://dist.ota.run/install.ps1))) -FromGit
